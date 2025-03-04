@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import ssl
@@ -9,20 +8,21 @@ from azure.functions import HttpMethod
 from sslpsk3 import wrap_socket
 from zabbix_utils import Sender
 
+# env var names
+ZABBIX_SERVER_HOST = "ZABBIX_SERVER_HOST"
+ZABBIX_PSK_SECRET = "ZABBIX_PSK_SECRET"
+ZABBIX_PSK_IDENTITY = "ZABBIX_PSK_IDENTITY"
+
+
 @dataclass
 class ZabbixRequest:
     host: str
     key: str
     value: str
 
-def psk_wrapper(sock, config):
-    psk = None
-    psk_identity = config.get('tlspskidentity').encode('utf-8')
-    psk_file = config.get('tlspskfile')
-
-    if psk_file:
-        with open(psk_file, encoding='utf-8') as f:
-            psk = bytes.fromhex(f.read())
+def psk_wrapper(sock, _):
+    psk = bytes.fromhex(os.environ.get(ZABBIX_PSK_SECRET))
+    psk_identity = os.environ.get(ZABBIX_PSK_IDENTITY).encode('utf-8')
 
     if psk and psk_identity:
         return wrap_socket(
@@ -40,23 +40,22 @@ app = func.FunctionApp()
 
 @app.route(route="ZabbixSend", methods=[HttpMethod.POST], auth_level=func.AuthLevel.FUNCTION)
 def ZabbixSend(req: func.HttpRequest) -> func.HttpResponse:
-    ZABBIX_CONFIG_FILE_PATH = "ZABBIX_CONFIG_FILE_PATH"
+    zabbix_server = os.environ.get(ZABBIX_SERVER_HOST)
 
     body_dict = req.get_json()
 
     if not body_dict:
-        return func.HttpResponse("Must provide body:{\"host\": \"str\", \"key\": \"str\", \"value\": \"str\",}.", status_code=400)
+        return func.HttpResponse("Must provide body:{\"host\": \"str\", \"key\": \"str\", \"value\": \"str\",}.",
+                                 status_code=400)
 
     body = ZabbixRequest(**body_dict)
 
-    config_path = os.environ.get(ZABBIX_CONFIG_FILE_PATH)
-    config_exists = os.path.exists(config_path)
+    sender = Sender(server=zabbix_server, socket_wrapper=psk_wrapper)
 
-    if not config_exists:
-        return func.HttpResponse("Config file doesn't exist", status_code=500)
-
-    sender = Sender(use_config=True, config_path=config_path, socket_wrapper=psk_wrapper)
-    response = sender.send_value(body.host, body.key, body.value)
+    try:
+        response = sender.send_value(body.host, body.key, body.value)
+    except Exception as e:
+        return func.HttpResponse(f"Failed to send value: {e}", status_code=500)
 
     if response.failed == 0:
         return func.HttpResponse(f"Value sent successfully in {response.time}", status_code=200)

@@ -1,0 +1,6 @@
+Server=127.0.0.1:10051
+ServerActive=127.0.0.1:10051
+TLSAccept=psk
+TLSConnect=psk
+TLSPSKIdentity=PSK-ID
+TLSPSKFile=/path/to/psk_file

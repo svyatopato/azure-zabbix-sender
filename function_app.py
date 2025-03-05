@@ -15,10 +15,46 @@ ZABBIX_PSK_IDENTITY = "ZABBIX_PSK_IDENTITY"
 
 
 @dataclass
-class ZabbixRequest:
+class ZabbixArgs:
     host: str
     key: str
     value: str
+
+    def __post_init__(self):
+        if self.host is None:
+            raise ValueError("customProperties.host cannot be null!")
+
+        if self.key is None:
+            raise ValueError("customProperties.key cannot be null!")
+
+        if self.value is None:
+            raise ValueError("customProperties.value cannot be null!")
+
+
+@dataclass
+class CustomProperties:
+    customProperties: ZabbixArgs
+
+    def __post_init__(self):
+        if self.customProperties is None:
+            raise ValueError("customProperties cannot be null!")
+
+
+@dataclass
+class AlertRequest:
+    data: CustomProperties
+
+
+def parse_json(body_dict: dict) -> AlertRequest:
+    if not body_dict:
+        raise ValueError("body is missing")
+
+    return AlertRequest(
+        data=CustomProperties(
+            customProperties=ZabbixArgs(**body_dict.get("data", {}).get("customProperties", {}))
+        )
+    )
+
 
 def psk_wrapper(sock, _):
     psk = bytes.fromhex(os.environ.get(ZABBIX_PSK_SECRET))
@@ -44,18 +80,22 @@ def ZabbixSend(req: func.HttpRequest) -> func.HttpResponse:
 
     body_dict = req.get_json()
 
-    if not body_dict:
-        return func.HttpResponse("Must provide body:{\"host\": \"str\", \"key\": \"str\", \"value\": \"str\",}.",
-                                 status_code=400)
-
-    body = ZabbixRequest(**body_dict)
+    try:
+        body = parse_json(body_dict)
+    except ValueError as e:
+        return func.HttpResponse(f"Invalid body: {e}", status_code=400)
 
     sender = Sender(server=zabbix_server, socket_wrapper=psk_wrapper)
 
+    host = body.data.customProperties.host
+    key = body.data.customProperties.key
+    value = body.data.customProperties.value
+
     try:
-        response = sender.send_value(body.host, body.key, body.value)
+        response = sender.send_value(host, key, value)
     except Exception as e:
-        return func.HttpResponse(f"Failed to send value: {e}", status_code=500)
+        logging.error(f"Failed to send value to zabbix(host: {host}, key: {key}, value: {value}): {e}")
+        return func.HttpResponse(f"Error occurred while sending data to Zabbix", status_code=500)
 
     if response.failed == 0:
         return func.HttpResponse(f"Value sent successfully in {response.time}", status_code=200)
@@ -63,10 +103,10 @@ def ZabbixSend(req: func.HttpRequest) -> func.HttpResponse:
         for node, chunks in response.details.items():
             for resp in chunks:
                 if resp.failed == 0:
-                    logging.info(f"Value sent successfully to {node} in {resp.time}")
+                    logging.debug(f"Value sent successfully to {node} in {resp.time}")
                 else:
-                    logging.error(f"Failed to send value to {node} at chunk step {resp.chunk}")
+                    logging.warning(f"Failed to send value to {node} at chunk step {resp.chunk}")
 
         return func.HttpResponse(f"Values sent {response.processed}/{response.total}", status_code=200)
     else:
-        return func.HttpResponse("Failed to send value:", status_code=500)
+        return func.HttpResponse("Request has been sent. But error occurred during processing", status_code=500)

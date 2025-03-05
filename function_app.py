@@ -1,59 +1,46 @@
 import logging
 import os
 import ssl
-from dataclasses import dataclass
 
 import azure.functions as func
 from azure.functions import HttpMethod
+from jsonschema.exceptions import ValidationError
 from sslpsk3 import wrap_socket
 from zabbix_utils import Sender
+from jsonschema import validate
 
 # env var names
 ZABBIX_SERVER_HOST = "ZABBIX_SERVER_HOST"
 ZABBIX_PSK_SECRET = "ZABBIX_PSK_SECRET"
 ZABBIX_PSK_IDENTITY = "ZABBIX_PSK_IDENTITY"
 
-
-@dataclass
-class ZabbixArgs:
-    host: str
-    key: str
-    value: str
-
-    def __post_init__(self):
-        if self.host is None:
-            raise ValueError("customProperties.host cannot be null!")
-
-        if self.key is None:
-            raise ValueError("customProperties.key cannot be null!")
-
-        if self.value is None:
-            raise ValueError("customProperties.value cannot be null!")
-
-
-@dataclass
-class CustomProperties:
-    customProperties: ZabbixArgs
-
-    def __post_init__(self):
-        if self.customProperties is None:
-            raise ValueError("customProperties cannot be null!")
-
-
-@dataclass
-class AlertRequest:
-    data: CustomProperties
-
-
-def parse_json(body_dict: dict) -> AlertRequest:
-    if not body_dict:
-        raise ValueError("body is missing")
-
-    return AlertRequest(
-        data=CustomProperties(
-            customProperties=ZabbixArgs(**body_dict.get("data", {}).get("customProperties", {}))
-        )
-    )
+schema = {
+    "type": "object",
+    "properties": {
+        "data": {
+            "type": "object",
+            "properties": {
+                "essentials": {
+                    "type": "object",
+                    "properties": {
+                        "description": {"type": "string"}
+                    },
+                    "required": ["description"]
+                },
+                "customProperties": {
+                    "type": "object",
+                    "properties": {
+                        "host": {"type": "string"},
+                        "key": {"type": "string"}
+                    },
+                    "required": ["host", "key"]
+                }
+            },
+            "required": ["essentials", "customProperties"]
+        }
+    },
+    "required": ["data"]
+}
 
 
 def psk_wrapper(sock, _):
@@ -78,18 +65,25 @@ app = func.FunctionApp()
 def ZabbixSend(req: func.HttpRequest) -> func.HttpResponse:
     zabbix_server = os.environ.get(ZABBIX_SERVER_HOST)
 
-    body_dict = req.get_json()
+    body = req.get_json()
 
     try:
-        body = parse_json(body_dict)
-    except ValueError as e:
-        return func.HttpResponse(f"Invalid body: {e}", status_code=400)
+        validate(body, schema)
+    except ValidationError as e:
+        response_object = {
+            "status": "400",
+            "message": "Validation failed",
+            "error": e.message,
+            "path": list(e.path),
+            "schema_path": list(e.schema_path)
+        }
+        return func.HttpResponse(f"{response_object}", status_code=400)
 
     sender = Sender(server=zabbix_server, socket_wrapper=psk_wrapper)
 
-    host = body.data.customProperties.host
-    key = body.data.customProperties.key
-    value = body.data.customProperties.value
+    host = body.get("data", {}).get("customProperties", {}).get("host")
+    key = body.get("data", {}).get("customProperties", {}).get("key")
+    value = body.get("data", {}).get("essentials", {}).get("description")
 
     try:
         response = sender.send_value(host, key, value)

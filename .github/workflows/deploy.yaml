@@ -45,3 +45,7 @@ jobs:
 #        Config for flex consumption
 #        sku: flexconsumption
 #        remote-build: true
+
+#       Config for consumption plan
+        scm-do-build-during-deployment: true
+        enable-oryx-build: true

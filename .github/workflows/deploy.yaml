@@ -7,6 +7,10 @@ on:
       - master
   workflow_dispatch:
 
+env:
+  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: ${{ vars.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+  PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
 
 jobs:
   build-and-deploy:

@@ -6,6 +6,13 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - test
 
 permissions:
   id-token: write
@@ -13,17 +20,21 @@ permissions:
 
 env:
   AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: ${{ vars.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-  PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: ${{ vars.AZURE_FUNCTIONAPP_PACKAGE_PATH || '.' }}
+  PYTHON_VERSION: ${{ vars.PYTHON_VERSION || 3.11 }}
+  ENVIRONMENT: ${{ inputs.environment || 'test' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ env.ENVIRONMENT }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Print Environment
+        run: echo "Deploying on ${{ env.ENVIRONMENT }} environment"
 
       - name: Set up Python
         uses: actions/setup-python@v5

@@ -67,6 +67,10 @@ def ZabbixSend(req: func.HttpRequest) -> func.HttpResponse:
 
     body = req.get_json()
 
+    if not body:
+        return func.HttpResponse("Body must not be empty", status_code=400)
+
+
     try:
         validate(body, schema)
     except ValidationError as e:

@@ -44,5 +44,5 @@ jobs:
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
 
 #         Config for flex consumption
-#          sku: flexconsumption
-#          remote-build: true
+          sku: flexconsumption
+          remote-build: true
